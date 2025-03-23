@@ -1,27 +1,6 @@
-import axios, {AxiosInstance, AxiosResponse} from 'axios';
 import * as dotenv from 'dotenv';
 import Bottleneck from 'bottleneck';
-import mime from 'mime';
 
-dotenv.config();
-
-// Configuration
-const {
-    NUCLINO_API_KEY,
-    DUST_API_KEY,
-    DUST_WORKSPACE_ID,
-} = process.env;
-
-
-const missingEnvVars = [
-    ['NUCLINO_API_KEY', NUCLINO_API_KEY],
-    ['DUST_API_KEY', DUST_API_KEY],
-    ['DUST_WORKSPACE_ID', DUST_WORKSPACE_ID],
-].filter(([name, value]) => !value).map(([name]) => name);
-
-if (missingEnvVars.length > 0) {
-    throw new Error(`Please provide values for the following environment variables in the .env file: ${missingEnvVars.join(', ')}`);
-}
 
 /**
  * All Things Nuclino go here until I take the time to split thing up nicely.
@@ -202,10 +181,6 @@ class NuclinoArticle implements NuclinoItem {
         return new NuclinoFile(data.id, data.itemId, data.fileName, data.createdAt, data.createdUserId, data.download);
     }
 
-    public async getRawData() {
-        const body = await axios.get(this.download.url);
-        return body.data.content;
-    }
 
 }
 */
@@ -216,10 +191,8 @@ class Nuclino {
 
     constructor(
         private rateLimiter: Bottleneck,
-        private apiConnection: AxiosInstance,
     ) {
         this.rateLimiter = rateLimiter;
-        this.apiConnection = apiConnection;
     }
 
     public async getUserInfo(userId: string): Promise<NuclinoUser> {
@@ -486,7 +459,6 @@ ${article.content}
 
 
 
-    public
 
     public async getItems(destination: Dustination, limit?: number, offset?: number): Promise<{
         documents: any,
@@ -526,43 +498,6 @@ interface Dustination {
 }
 
 
-/**
- * Bootstrap
- */
-
-
-// Create a Bottleneck limiter for Dust API
-const dustLimiter = new Bottleneck({
-    minTime: 500, // 500ms between requests. limit of 120 upserts / minute per workspace https://docs.dust.tt/reference/rate-limits
-    maxConcurrent: 1, // Only 1 request at a time
-});
-
-const nuclinoLimiter = new Bottleneck({
-    minTime: 500, // 400 between requests. per https://help.nuclino.com/b147124e-rate-limiting
-    maxConcurrent: 1, // Only 1 request at a time
-});
-
-
-const nuclinoApi = axios.create({
-    baseURL: 'https://api.nuclino.com/v0',
-    headers: {
-        Authorization: `${NUCLINO_API_KEY}`,
-        Accept: 'application/json',
-    },
-});
-
-const dustApi = axios.create({
-    baseURL: `https://dust.tt/api/v1/w/${DUST_WORKSPACE_ID}/`,
-    headers: {
-        Authorization: `Bearer ${DUST_API_KEY}`,
-        'Content-Type': 'application/json',
-    },
-});
-
-const nuclino = new Nuclino(nuclinoLimiter, nuclinoApi);
-
-const dust = new Dust(dustLimiter, DUST_WORKSPACE_ID);
-
 class Mode {
     private constructor(private readonly value: string) {
     }
@@ -597,11 +532,6 @@ class Mode {
     }
 
 }
-
-
-/**
- * Time to run some code
- */
 
 
 class NuclinoSyncJob {
@@ -691,6 +621,56 @@ class NuclinoSyncJob {
     }
 
 }
+
+
+
+/**
+ * Bootstrap
+ */
+
+// Create a Bottleneck limiter for Dust API
+const dustLimiter = new Bottleneck({
+    minTime: 500, // 500ms between requests. limit of 120 upserts / minute per workspace https://docs.dust.tt/reference/rate-limits
+    maxConcurrent: 1, // Only 1 request at a time
+});
+
+const nuclinoLimiter = new Bottleneck({
+    minTime: 500, // 400 between requests. per https://help.nuclino.com/b147124e-rate-limiting
+    maxConcurrent: 1, // Only 1 request at a time
+});
+
+
+
+/**
+ * Time to run some code
+ */
+
+dotenv.config();
+
+// Configuration
+const {
+    NUCLINO_API_KEY,
+    DUST_API_KEY,
+    DUST_WORKSPACE_ID,
+} = process.env;
+
+
+const missingEnvVars = [
+    ['NUCLINO_API_KEY', NUCLINO_API_KEY],
+    ['DUST_API_KEY', DUST_API_KEY],
+    ['DUST_WORKSPACE_ID', DUST_WORKSPACE_ID],
+].filter(([name, value]) => !value).map(([name]) => name);
+
+if (missingEnvVars.length > 0) {
+    throw new Error(`Please provide values for the following environment variables in the .env file: ${missingEnvVars.join(', ')}`);
+}
+
+
+const nuclino = new Nuclino(nuclinoLimiter);
+
+const dust = new Dust(dustLimiter, DUST_WORKSPACE_ID);
+
+
 
 // Run the migration
 if (process.argv.length < 6 || ["sync", "archive", "dryrun"].indexOf(process.argv[5])) {
