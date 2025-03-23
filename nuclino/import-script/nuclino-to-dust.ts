@@ -228,7 +228,7 @@ class Nuclino {
                 return this.users.get(userId);
             }
             const response = await this.doThrottledGetRequest(`/users/${userId}`);
-            const user = NuclinoUser.fromRawData(response.data.data);
+            const user = NuclinoUser.fromRawData(response.data);
             this.users.set(userId, user);
             return user;
         } catch (error) {
@@ -241,14 +241,47 @@ class Nuclino {
 
     }
 
+
     private async doThrottledGetRequest(url: string, data?: any) {
-        return this.rateLimiter.schedule(() => this.apiConnection.get(url, data));
+        const params = new URLSearchParams();
+        if (data?.params) {
+            Object.entries(data.params).forEach(([key, value]) => {
+                if (typeof value === "string") {
+                    params.append(key, value);
+                }
+            });
+        }
+
+        const queryString = params.toString();
+        const fullUrl = `https://api.nuclino.com/v0${url}${queryString ? `?${queryString}` : ''}`;
+
+        return this.rateLimiter.schedule(async () => {
+            try {
+                const response = await fetch(fullUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `${NUCLINO_API_KEY}`,
+                        'Accept': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(60 * 1000), // <=== HERE
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.log("error", error);
+            }
+        });
     }
+
 
     public async getWorkspace(name: string): Promise<NuclinoWorkspace> {
         try {
             const response = await this.doThrottledGetRequest(`/workspaces`);
-            const workspaceRawata = response.data.data.results.find(workspace => workspace.name === name);
+            const workspaceRawata = response.data.results.find(workspace => workspace.name === name);
             return NuclinoWorkspace.fromRawData(workspaceRawata);
 
         } catch (error) {
@@ -265,13 +298,13 @@ class Nuclino {
     public async getItem(itemId: string): Promise<NuclinoItem> {
         try {
             const response = await this.doThrottledGetRequest(`/items/${itemId}`);
-            switch (response.data.data.object) {
+            switch (response.data.object) {
                 case 'collection': {
-                    return NuclinoCollection.fromRawData(response.data.data);
+                    return NuclinoCollection.fromRawData(response.data);
 
                 }
                 case 'item': {
-                    return NuclinoArticle.fromRawData(response.data.data);
+                    return NuclinoArticle.fromRawData(response.data);
 
                 }
 
@@ -286,18 +319,18 @@ class Nuclino {
     }
 
 
-   /* public async getFile(fileId: string): Promise<NuclinoFile> {
-        try {
-            const response = await this.doThrottledGetRequest(`/files/${fileId}`);
-            return NuclinoFile.fromRawData(response.data.data);
-        } catch (error) {
-            console.error(
-                `Error fetching file ${fileId}:`,
-                error.message
-            );
-            throw error;
-        }
-    }*/
+    /* public async getFile(fileId: string): Promise<NuclinoFile> {
+         try {
+             const response = await this.doThrottledGetRequest(`/files/${fileId}`);
+             return NuclinoFile.fromRawData(response.data.data);
+         } catch (error) {
+             console.error(
+                 `Error fetching file ${fileId}:`,
+                 error.message
+             );
+             throw error;
+         }
+     }*/
 
 
     public async getAllItems(workspaceId, after) {
@@ -322,13 +355,13 @@ class Nuclino {
 class Dust {
     constructor(
         private rateLimiter: Bottleneck,
-        private apiConnection: AxiosInstance,
+        private workspaceId: string,
     ) {
         this.rateLimiter = rateLimiter;
-        this.apiConnection = apiConnection;
+        this.workspaceId = workspaceId;
     }
+
     public async upsertArticleToDustDatasource(article: NuclinoArticle, author: NuclinoUser, lastUpdater: NuclinoUser, breadCrumb: string, destination: Dustination) {
-        const documentId = `article-${article.id}`;
         const fullPath = `${breadCrumb}`
         const content = `
 Path: ${fullPath}
@@ -344,7 +377,7 @@ ${article.content}
 
         try {
             await this.doThrottledPostRequest(
-                `/vaults/${destination.spaceId}/data_sources/${destination.sourceId}/documents/${documentId}`,
+                `/vaults/${destination.spaceId}/data_sources/${destination.sourceId}/documents/${article.id}`,
                 {
                     title: article.title,
                     mime_type: 'text/markdown',
@@ -352,7 +385,6 @@ ${article.content}
                     source_url: article.url,
                 }
             );
-            console.log(`Upserted article ${article.id} to Dust datasource`);
         } catch (error) {
             console.error(`Error upserting article ${article.id} to Dust datasource:`, error);
         }
@@ -360,8 +392,128 @@ ${article.content}
 
 
 
+    private async doThrottledGetRequest(url: string, data?: any) {
+        const params = new URLSearchParams();
+        if (data?.params) {
+            Object.entries(data.params).forEach(([key, value]) => {
+                if (typeof value === "string" || typeof value === "number") {
+                    params.append(key, "" + value);
+                }
+            });
+        }
+
+        const queryString = params.toString();
+        const fullUrl = `https://dust.tt/api/v1/w/${this.workspaceId}${url}${queryString ? `?${queryString}` : ''}`;
+
+        return this.rateLimiter.schedule(async () => {
+            try {
+            const response = await fetch(fullUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${DUST_API_KEY}`,
+                    'Accept': 'application/json'
+                },
+                signal: AbortSignal.timeout(60 * 1000), // <=== HERE
+            });
+
+            if (!response.ok) {
+
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+
+            return await response.json();
+            } catch (error) {
+                console.log("error", error);
+            }
+        });
+    }
+
     public async doThrottledPostRequest(url: string, data?: any, config?: any) {
-        return await this.rateLimiter.schedule(() => this.apiConnection.post(url, data, config));
+        const fullUrl = `https://dust.tt/api/v1/w/${this.workspaceId}${url}`
+
+        const response = await fetch(fullUrl, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${DUST_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            // Include the body as JSON
+            body: JSON.stringify(data),
+            signal: AbortSignal.timeout(60 * 1000), // <=== HERE
+            // Add any other fetch options from config
+            ...config
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
+        return await response.json();
+    }
+
+
+    private async doThrottledDeleteRequest(url: string, data?: any) {
+        const params = new URLSearchParams();
+        if (data?.params) {
+            Object.entries(data.params).forEach(([key, value]) => {
+                if (typeof value === "string" || typeof value === "number") {
+                    params.append(key, "" + value);
+                }
+            });
+        }
+
+        const queryString = params.toString();
+        const fullUrl = `https://dust.tt/api/v1/w/${this.workspaceId}${url}${queryString ? `?${queryString}` : ''}`;
+
+        return this.rateLimiter.schedule(async () => {
+            const response = await fetch(fullUrl, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${DUST_API_KEY}`,
+                    'Accept': 'application/json'
+                },
+                signal: AbortSignal.timeout(60 * 1000), // <=== HERE
+            });
+
+            if (!response.ok) {
+
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+
+            return await response.json();
+        });
+    }
+
+
+
+    public
+
+    public async getItems(destination: Dustination, limit?: number, offset?: number): Promise<{
+        documents: any,
+        total: number
+    }> {
+        try {
+            const results = await this.doThrottledGetRequest(
+                `/spaces/${destination.spaceId}/data_sources/${destination.sourceId}/documents`,
+                {
+                    params: {
+                        limit: limit ? limit : 100,
+                        offset: offset ? offset : 0
+                    }
+                })
+            ;
+            return results;
+        } catch (error) {
+            console.error('Error fetching items from Dust:', error);
+        }
+    }
+
+    public async removeDocument(destination: Dustination, documentId: string) {
+        try {
+            return this.doThrottledDeleteRequest(`/vaults/${destination.spaceId}/data_sources/${destination.sourceId}/documents/${documentId}`);
+        } catch (error) {
+            console.error('Error removing document from Dust:', error);
+        }
     }
 }
 
@@ -409,7 +561,42 @@ const dustApi = axios.create({
 
 const nuclino = new Nuclino(nuclinoLimiter, nuclinoApi);
 
-const dust = new Dust(dustLimiter, dustApi);
+const dust = new Dust(dustLimiter, DUST_WORKSPACE_ID);
+
+class Mode {
+    private constructor(private readonly value: string) {
+    }
+
+
+    static fromString(value: string): Mode {
+        if (["sync", "archive", "dryrun"].indexOf(value) === -1) {
+            throw new Error(`Invalid Mode: ${value}`);
+
+        }
+        return new Mode(value);
+    }
+
+    toString(): string {
+        return this.value;
+    }
+
+    equals(other: Mode): boolean {
+        return this.value === other.value;
+    }
+
+    static dryrun(): Mode {
+        return new Mode('dryrun');
+    }
+
+    static archive(): Mode {
+        return new Mode('archive');
+    }
+
+    static sync(): Mode {
+        return new Mode('sync');
+    }
+
+}
 
 
 /**
@@ -417,10 +604,10 @@ const dust = new Dust(dustLimiter, dustApi);
  */
 
 
-
 class NuclinoSyncJob {
 
-    private syncedArticles: Map<string, boolean> = new Map();
+    private dustArticles: Map<string, number> = new Map<string, number>()
+
     constructor(
         private nuclino: Nuclino,
         private dust: Dust,
@@ -429,19 +616,38 @@ class NuclinoSyncJob {
     ) {
     }
 
-    public async run() {
+    public async run(mode: Mode) {
+        /**
+         * The strategy is as follows:
+         * 1. Get all documents in Dust data source and mark the last update date
+         * 2. Recurse into nuclino workspace and upsert all documents with a last update date after the one we found in dust
+         * 3. Any dust documents that were not found in nuclino will be removed from dust
+         */
         const workspace = await nuclino.getWorkspace(this.workspaceName);
-        await this.recursiveSync(workspace, workspace.name);
+
+        await this.fetchAllDustArticles();
+        await this.recursiveSync(workspace, workspace.name, mode);
+        if (mode.equals(Mode.sync())) {
+            await this.removeDustArticlesNotInNuclino();
+        }
     }
 
 
-    private async  recursiveSync(nuclinoItem: NuclinoItem, breadCrumb: string) {
+    private async recursiveSync(nuclinoItem: NuclinoItem, breadCrumb: string, mode: Mode) {
         switch (nuclinoItem.object) {
             case 'item': {
                 if (nuclinoItem instanceof NuclinoArticle) {
-                    const author = await this.nuclino.getUserInfo(nuclinoItem.createdUserId);
-                    const lastUpdater = await this.nuclino.getUserInfo(nuclinoItem.lastUpdatedUserId);
-                    await this.dust.upsertArticleToDustDatasource(nuclinoItem, author, lastUpdater, breadCrumb, this.destination);
+                    if (!this.dustArticles.has(nuclinoItem.id) || this.dustArticles.get(nuclinoItem.id) < nuclinoItem.lastUpdatedAt.getTime()) {
+                        const author = await this.nuclino.getUserInfo(nuclinoItem.createdUserId);
+                        const lastUpdater = await this.nuclino.getUserInfo(nuclinoItem.lastUpdatedUserId);
+                        if (!mode.equals(Mode.dryrun())) {
+                            await this.dust.upsertArticleToDustDatasource(nuclinoItem, author, lastUpdater, breadCrumb, this.destination);
+                        }
+                        console.log(`Upserted ${nuclinoItem.id}`);
+                    } else {
+                        console.log(`Skipping ${nuclinoItem.id} because it was updated before the last update date`);
+                    }
+                    this.dustArticles.delete(nuclinoItem.id);
                 }
                 return;
             }
@@ -449,7 +655,7 @@ class NuclinoSyncJob {
             case 'collection': {
                 for (const item of nuclinoItem.childIds) {
                     const itemData = await this.nuclino.getItem(item);
-                    this.recursiveSync(itemData, `${breadCrumb}/${itemData.title}`);
+                    await this.recursiveSync(itemData, `${breadCrumb}/${itemData.title}`, mode);
 
                 }
             }
@@ -458,25 +664,38 @@ class NuclinoSyncJob {
 
     }
 
-}
+    private async fetchAllDustArticles(): void {
+        let response = {total: 0};
+        let offset = 0;
+        const limit = 200;
+        do {
+            response = await this.dust.getItems(this.destination, limit, offset);
 
-async function migrateContent(workspaceName: string, destination: Dustination) {
-    try {
-        console.log('Starting migration...' + workspaceName);
-        const workspace = await nuclino.getWorkspace(workspaceName);
-        await recursiveSync(workspace, workspaceName, dust, nuclino, destination);
 
 
-        console.log('Migration completed successfully!');
-    } catch (error) {
-        console.error('Migration failed:', error.message);
+            for (const document of response.documents) {
+                this.dustArticles.set(document.document_id, document.timestamp);
+            }
+            offset += limit;
+
+        } while (response.total > offset);
+        console.log(this.dustArticles.size + " articles found in dust");
+
     }
+
+    private async removeDustArticlesNotInNuclino(): Promise<void> {
+        for (const articleId of this.dustArticles.keys()) {
+            console.log(`Removing ${articleId} from Dust`);
+            await this.dust.removeDocument(this.destination, articleId);
+        }
+    }
+
 }
 
 // Run the migration
-if (process.argv.length < 5) {
-    console.error('Usage: npm run import <nuclinoWorkspaceName> <DustSpaceId> <DustDataSourceId>');
+if (process.argv.length < 6 || ["sync", "archive", "dryrun"].indexOf(process.argv[5])) {
+    console.error('Usage: npm run import <nuclinoWorkspaceName> <DustSpaceId> <DustDataSourceId> <mode>sync|archive|dryrun</mode>');
     process.exit(1);
 }
-console.log(process.argv);
-migrateContent(process.argv[2], {spaceId: process.argv[3], sourceId: process.argv[4]});
+const job = new NuclinoSyncJob(nuclino, dust, process.argv[2], {spaceId: process.argv[3], sourceId: process.argv[4]});
+job.run(Mode.fromString(process.argv[5]));
