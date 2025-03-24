@@ -35,6 +35,15 @@ function showCredentialsDialog() {
   if (result.getSelectedButton() == ui.Button.OK) {
     docProperties.setProperty("dustToken", result.getResponseText());
   }
+
+  var result = ui.prompt(
+    "Setup Dust",
+    "Region (optional, leave empty for US or enter 'eu' for EU region):",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (result.getSelectedButton() == ui.Button.OK) {
+    docProperties.setProperty("region", result.getResponseText());
+  }
 }
 
 function handleCellSelection() {
@@ -482,7 +491,7 @@ function fetchAssistants() {
   }
 
   try {
-    const BASE_URL = `https://dust.tt/api/v1/w/${workspaceId}`;
+    const BASE_URL = `${getDustBaseUrl()}/api/v1/w/${workspaceId}`;
     const response = UrlFetchApp.fetch(
       `${BASE_URL}/assistant/agent_configurations`,
       {
@@ -543,7 +552,7 @@ function processWithAssistant(
     );
   }
 
-  const BASE_URL = `https://dust.tt/api/v1/w/${workspaceId}`;
+  const BASE_URL = `${getDustBaseUrl()}/api/v1/w/${workspaceId}`;
   const selectedValues = selected.getValues();
   const totalCells = selectedValues.reduce((acc, row) => acc + row.length, 0);
   let processedCells = 0;
@@ -665,4 +674,15 @@ function columnToIndex(column) {
   }
 
   return sum;
+}
+
+function getDustBaseUrl() {
+  const docProperties = PropertiesService.getDocumentProperties();
+  const region = docProperties.getProperty("region");
+
+  if (region && region.toLowerCase() === "eu") {
+    return "https://eu.dust.tt";
+  }
+
+  return "https://dust.tt";
 }
