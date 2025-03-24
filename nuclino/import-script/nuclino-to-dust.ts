@@ -209,7 +209,6 @@ class Nuclino {
                 `Error fetching  user ${userId}:`,
                 error.message
             );
-            throw error;
         }
 
     }
@@ -246,6 +245,7 @@ class Nuclino {
                 return await response.json();
             } catch (error) {
                 console.log("error", error);
+                throw error;
             }
         });
     }
@@ -390,13 +390,13 @@ ${article.content}
             });
 
             if (!response.ok) {
-
                 throw new Error(`HTTP error! Status: ${response.status}`);
             }
 
             return await response.json();
             } catch (error) {
                 console.log("error", error);
+                throw error;
             }
         });
     }
@@ -449,7 +449,6 @@ ${article.content}
             });
 
             if (!response.ok) {
-
                 throw new Error(`HTTP error! Status: ${response.status}`);
             }
 
